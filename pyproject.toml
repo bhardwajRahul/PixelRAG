@@ -42,7 +42,7 @@ serve = [
     "qwen-vl-utils",
     "pydantic>=2.0.0",
 ]
-index = ["pixelrag[embed]", "pyyaml>=6.0"]
+index = ["pixelrag[embed]", "pyyaml>=6.0", "markdown>=3.4"]
 all = ["pixelrag[embed,serve,index]"]
 gpu = ["faiss-gpu-cu12>=1.13.2; sys_platform == 'linux'"]
 playwright = ["playwright>=1.40.0"]

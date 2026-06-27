@@ -95,41 +95,76 @@ def build(config: dict, limit: int | None = None, force: bool = False) -> Path:
     # Render text files (.md, .txt) — convert to styled HTML, then render via CDP
     if text_docs:
         import html as html_mod
+        import re
         import tempfile
+
+        import markdown as md_lib
 
         _HTML_TEMPLATE = (
             '<html><head><meta charset="utf-8"><style>'
-            "body { font-family: -apple-system, system-ui, sans-serif; "
-            "max-width: 860px; margin: 40px auto; padding: 20px; line-height: 1.7; "
-            "color: #1a1a1a; } "
-            "pre, code { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; "
-            "font-size: 14px; } "
-            "pre { padding: 16px; overflow-x: auto; white-space: pre-wrap; } "
-            "h1,h2,h3 { color: #111; } "
-            "table { border-collapse: collapse; width: 100%; } "
-            "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }"
+            "body { font-family: -apple-system, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif; "
+            "max-width: 860px; margin: 40px auto; padding: 20px; line-height: 1.6; "
+            "color: #1f2328; font-size: 16px; } "
+            "h1, h2, h3 { border-bottom: 1px solid #d1d9e0; padding-bottom: 0.3em; } "
+            "h1 { font-size: 2em; } h2 { font-size: 1.5em; } h3 { font-size: 1.25em; } "
+            "code { background: #eff1f3; padding: 0.2em 0.4em; border-radius: 6px; font-size: 85%%; "
+            "font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; } "
+            "pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; } "
+            "pre code { background: none; padding: 0; } "
+            "table { border-collapse: collapse; width: 100%%; margin: 16px 0; } "
+            "th, td { border: 1px solid #d1d9e0; padding: 6px 13px; } "
+            "th { background: #f6f8fa; font-weight: 600; } "
+            "a { color: #0969da; text-decoration: none; } "
+            "blockquote { border-left: 4px solid #d1d9e0; margin: 0; padding: 0 16px; color: #59636e; } "
+            "img { max-width: 100%%; } "
+            "hr { border: none; border-top: 1px solid #d1d9e0; margin: 24px 0; } "
             "</style></head><body>"
         )
-        tmp_dir = tempfile.mkdtemp(prefix="pixelrag_text_")
+
+        def _resolve_relative_paths(html_str: str, base_dir: str) -> str:
+            """Rewrite relative src/href paths to file:// so the browser can load them."""
+
+            def _repl(m: re.Match) -> str:
+                attr, quote, url = m.group(1), m.group(2), m.group(3)
+                if url.startswith(("http://", "https://", "file://", "data:", "#")):
+                    return m.group(0)
+                resolved = (Path(base_dir) / url).resolve()
+                return f"{attr}={quote}{resolved.as_uri()}{quote}"
+
+            return re.sub(r'(src|href)=(["\'])([^"\']+)\2', _repl, html_str)
+
         text_urls = []
         text_stems = []
 
-        for idx, doc in text_docs:
-            if (tiles_dir / f"{idx}.png.tiles" / "tiles.json").exists():
-                continue
-            content = Path(doc.path).read_text(errors="replace")
-            escaped = html_mod.escape(content)
-            html_content = f"{_HTML_TEMPLATE}<pre>{escaped}</pre></body></html>"
-            html_path = Path(tmp_dir) / f"{idx}.html"
-            html_path.write_text(html_content)
-            text_urls.append(f"file://{html_path.resolve()}")
-            text_stems.append(str(idx))
+        with tempfile.TemporaryDirectory(prefix="pixelrag_text_") as tmp_dir:
+            for idx, doc in text_docs:
+                if (tiles_dir / f"{idx}.png.tiles" / "tiles.json").exists():
+                    continue
+                src_path = Path(doc.path)
+                content = src_path.read_text(errors="replace")
+                ext = (doc.metadata or {}).get("extension", src_path.suffix.lower())
+                if ext == ".md":
+                    body = md_lib.markdown(
+                        content, extensions=["tables", "fenced_code"]
+                    )
+                else:
+                    body = f"<pre>{html_mod.escape(content)}</pre>"
+                body = _resolve_relative_paths(body, str(src_path.parent))
+                html_content = f"{_HTML_TEMPLATE}{body}</body></html>"
+                html_path = Path(tmp_dir) / f"{idx}.html"
+                html_path.write_text(html_content)
+                text_urls.append(f"file://{html_path.resolve()}")
+                text_stems.append(str(idx))
 
-        if text_urls:
-            text_ingest = {k: v for k, v in ingest_cfg.items() if k != "backend"}
-            render_urls(
-                text_urls, str(tiles_dir), backend="cdp", stems=text_stems, **text_ingest
-            )
+            if text_urls:
+                text_ingest = {k: v for k, v in ingest_cfg.items() if k != "backend"}
+                render_urls(
+                    text_urls,
+                    str(tiles_dir),
+                    backend="cdp",
+                    stems=text_stems,
+                    **text_ingest,
+                )
         logger.info("  Rendered %d text files (.md/.txt)", len(text_docs))
 
     # Render PDFs
