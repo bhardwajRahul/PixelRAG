@@ -43,6 +43,7 @@ serve = [
     "faiss-cpu>=1.9.0",
     "transformers>=4.57.0",
     "torch>=2.9.0",
+    "torchvision>=0.24.0",  # transformers' Qwen3-VL processor needs it; cu129 via tool.uv.sources
     "qwen-vl-utils",
     "pydantic>=2.0.0",
 ]
