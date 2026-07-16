@@ -171,10 +171,11 @@ def build(config: dict, limit: int | None = None, force: bool = False) -> Path:
                 )
         logger.info("  Rendered %d text files (.md/.txt)", len(text_docs))
 
-    # Render PDFs
+    # Render PDFs — use idx as tile directory name (like URLs) so directory
+    # names are always the numeric article_id.
     for idx, doc in pdf_docs:
         try:
-            render_pdf(doc.path, str(tiles_dir))
+            render_pdf(doc.path, str(tiles_dir), stem=str(idx))
         except Exception as e:
             logger.warning("  FAILED PDF %s: %s", doc.id, e)
     if pdf_docs:
@@ -213,6 +214,23 @@ def build(config: dict, limit: int | None = None, force: bool = False) -> Path:
             except Exception as e:
                 logger.warning("  FAILED image %s: %s", doc.id, e)
         logger.info("  Rendered %d local images", len(image_docs))
+
+    # Write article_id into each tile directory's manifests so the embed
+    # pipeline reads it explicitly instead of guessing from the directory name.
+    # tiles.json always exists here; chunks.json exists only for PDFs (pdf.py
+    # writes it at render time, and chunk.py then skips those dirs). For every
+    # other source chunks.json is created by Stage 2's chunk.py, which
+    # propagates article_id from tiles.json. So write whichever exist now.
+    for idx, _ in url_docs + text_docs + pdf_docs + image_docs:
+        for manifest_name in ("tiles.json", "chunks.json"):
+            manifest_path = tiles_dir / f"{idx}.png.tiles" / manifest_name
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text())
+                    manifest["article_id"] = idx
+                    manifest_path.write_text(json.dumps(manifest))
+                except (json.JSONDecodeError, OSError):
+                    pass
 
     # Save articles.json for serve API — title + URL per article.
     # Use the pipeline's sequential *position index* (0, 1, 2, …) rather than
